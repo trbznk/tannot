@@ -9,6 +9,7 @@ from dataclasses import dataclass
 NAVIGATION_TEXT = "[s] Save [q] Quit [r] Remove label [n] Next"
 QUIT_NAVIGATION_TEXT = "Do you want to save before quitting? [y] Yes [n] No"
 # TODO: add number of tasks in labeling job and other meta information to status window to the right
+# TODO: remove quit dialog when saved and there are no changes
 
 
 @dataclass
@@ -60,15 +61,21 @@ class Job:
 
 
 class GUI:
-    def __init__(self, screen: curses.window):
-        screen.nodelay(1)
-        
-        self.height, self.width = screen.getmaxyx()
-        
-        curses.curs_set(0)
+    def __init__(self, screen: curses.window, labels):
+        self.screen = screen
+        self.labels = labels
 
+    def init(self):
+        self.init_screen()
         self.init_colors()
         self.init_windows()
+        self.init_labels()
+
+    def init_screen(self):
+        self.screen.nodelay(1)
+        self.height, self.width = self.screen.getmaxyx()
+
+        curses.curs_set(0)
 
     def init_colors(self):
         curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)
@@ -98,10 +105,10 @@ class GUI:
         self.navigation_window.refresh()
         self.status_window.refresh()
 
-    def init_labels(self, labels):
+    def init_labels(self):
         i = 0
         ci = 1
-        for i, label in enumerate(labels):
+        for i, label in enumerate(self.labels):
             self.labels_window.addstr(f"[{i+1}] {label} ", curses.color_pair(ci))
             ci += 1
             if ci == 6:
@@ -135,9 +142,12 @@ class GUI:
         self.status_window.addstr(text)
         self.status_window.refresh()
 
-    def get_key(self):
+    def get_key(self) -> str:
         key = self.navigation_window.getch()
-        return chr(key)
+        if key == curses.KEY_RESIZE:
+            return "resize"
+        else:
+            return chr(key)
 
     def switch_to_quit_navigation(self):
         self.navigation_window.clear()
@@ -182,14 +192,18 @@ def main(screen: curses.window, path: str):
     job = Job(path)
     job.load()
 
-    gui = GUI(screen)
-    gui.init_labels(job.labels)
+    gui = GUI(screen, job.labels)
+    gui_is_init = False
     keep_task = False
     do_quit = False
     while True:
+        if not gui_is_init:
+            gui.init()
+            gui_is_init = True
+
         if not keep_task:
             task_index, task = job.next_task()
-            gui.update_content(task["text"])
+        gui.update_content(task["text"])
         gui.update_meta(task_index, task)
         key = gui.get_key()
         
@@ -222,10 +236,13 @@ def main(screen: curses.window, path: str):
             task_index, task = job.add_label(task_index, label_index)
             keep_task = False
             status_text = ""
+        elif key == "resize":
+            status_text = key
+            gui_is_init = False
+            keep_task = True
         else:
             status_text = key
             keep_task = True
-
         gui.update_status(status_text)
 
         if do_quit:
